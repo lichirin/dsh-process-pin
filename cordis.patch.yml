@@ -1,0 +1,5 @@
+# dsh-process-pin bundle patch: one host row over the web profile.
+# 本地插件：让「轮次过程控件 / 展开的单条标题」在会话顶部吸顶（Excel 冻结窗格效果）。
+- insert:
+    - id: process-pin
+      name: dsh-process-pin

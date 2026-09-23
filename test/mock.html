@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>dsh-process-pin · DOM 契约测试台</title>
+    <style>
+      :root {
+        --dsw-alias-bg-base: #151517;
+        --dsw-alias-bg-layer-1: #1b1b1d;
+        --dsw-alias-bg-layer-2: #232325;
+        --dsw-alias-bg-layer-3: #1b1b1d;
+        --dsw-alias-border-l1: #ffffff0f;
+        --dsw-alias-border-l2: #ffffff1f;
+        --dsw-alias-border-l3: #ffffff29;
+        --dsw-alias-border-l4: #ffffff33;
+        --dsw-alias-label-primary: #e8e8e8;
+        --dsw-alias-label-secondary: #9b9b9b;
+        --dsw-alias-label-tertiary: #7d7d7d;
+        --dsw-alias-state-business-primary: #4d9fff;
+        --dsw-alias-brand-primary: #4d9fff;
+        --dsw-alias-interactive-bg-hover: #ffffff14;
+        --dsw-alias-label-primary-foreground: #ffffff;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--dsw-alias-bg-base);
+        color: var(--dsw-alias-label-primary);
+        font-family: "Microsoft YaHei", system-ui, sans-serif;
+      }
+      /* ── 复刻宿主 [data-conversation-scroll]：真正的 scrollport ── */
+      [data-conversation-scroll] {
+        position: relative;
+        height: 100vh;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+      }
+      .column {
+        display: flex;
+        flex-direction: column;
+        max-width: 760px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      /* 宿主：每个 flowItem 之前 16px 间距（落在 margin-top 里） */
+      .column > * + * {
+        margin-top: 16px;
+      }
+      .flowItem {
+        min-width: 0;
+      }
+      /* ── 复刻宿主轮次过程控件 ── */
+      button[data-turn-process] {
+        box-sizing: border-box;
+        border: none;
+        border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+        width: 100%;
+        min-width: 0;
+        height: 33px;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+        text-align: left;
+        background: 0 0;
+        align-items: center;
+        padding: 0 0 8px;
+        display: flex;
+        font-size: 14px;
+        line-height: 24px;
+      }
+      button[data-turn-process]:not([data-open]) {
+        margin-bottom: 8px;
+      }
+      /* ── 复刻宿主 DisclosureRow ── */
+      [data-disclosure-root] {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-width: 0;
+      }
+      [data-disclosure-row] {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        height: 24px;
+        min-width: 0;
+        font-size: 13px;
+        line-height: 24px;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+      }
+      .rowbody {
+        padding: 6px 0 6px 22px;
+        font-size: 13px;
+        line-height: 20px;
+        color: #cfcfcf;
+        white-space: pre-wrap;
+      }
+      .tool {
+        height: 44px;
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        color: var(--dsw-alias-label-secondary);
+        border-left: 2px solid var(--dsw-alias-border-l1);
+        padding-left: 10px;
+      }
+      .prose {
+        font-size: 14px;
+        line-height: 22px;
+        color: var(--dsw-alias-label-primary);
+      }
+      [data-composer-seat] {
+        position: sticky;
+        bottom: 0;
+        z-index: 7;
+        margin-top: 16px;
+        padding: 12px 0 20px;
+        background: linear-gradient(180deg, #15151700 0px, var(--dsw-alias-bg-base) 36px);
+      }
+      .composer-box {
+        max-width: 760px;
+        margin: 0 auto;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 12px;
+        padding: 12px;
+        color: var(--dsw-alias-label-tertiary);
+        font-size: 13px;
+      }
+      /* 断言面板（只属于测试台） */
+      #diag {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        z-index: 999;
+        max-width: 420px;
+        background: #0b0b0cf2;
+        border: 1px solid var(--dsw-alias-border-l3);
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        line-height: 17px;
+        font-family: Consolas, "Courier New", monospace;
+        color: #cfcfcf;
+        white-space: pre-wrap;
+      }
+      #diag b {
+        color: #fff;
+      }
+      .ok {
+        color: #69db7c;
+      }
+      .bad {
+        color: #ff6b6b;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-conversation-scroll id="scrollport">
+      <div class="column" id="column"></div>
+      <div data-composer-seat>
+        <div class="composer-box">输入框（composer seat）</div>
+      </div>
+    </div>
+    <div id="diag">booting…</div>
+
+    <script>
+      document.getElementById('diag').textContent = 'stage: script-a'
+      // ══════════════ 1. 复刻宿主的会话流 DOM 契约 ══════════════
+      const column = document.getElementById('column')
+      const scrollport = document.getElementById('scrollport')
+
+      function flowItem(kind, turn, inner, extra) {
+        const div = document.createElement('div')
+        div.className = 'flowItem'
+        div.setAttribute('data-chat-flow-key', kind + '-' + turn + '-' + column.children.length)
+        div.setAttribute('data-chat-flow-kind', kind)
+        div.setAttribute('data-chat-turn', String(turn))
+        if (extra) for (const [key, value] of Object.entries(extra)) div.setAttribute(key, value)
+        div.innerHTML = inner
+        column.appendChild(div)
+        return div
+      }
+
+      const filler = (text, height) => '<div class="prose" style="height:' + height + 'px">' + text + '</div>'
+
+      // 第 1 轮：一个"已收起"的过程控件（不该吸顶）
+      flowItem('user', 1, '<div class="prose">第 1 轮：用户消息</div>')
+      flowItem('turn-process', 1, '<button type="button" data-turn-process="1">3 次工具调用</button>')
+      flowItem('assistant-step', 1, filler('第 1 轮正文。', 260))
+
+      // 第 2 轮：展开的过程控件 + 过程组成员 + 一条很长的 Think + 正文
+      flowItem('user', 2, '<div class="prose">第 2 轮：用户消息</div>')
+      const tp2 = flowItem(
+        'turn-process',
+        2,
+        '<button type="button" data-turn-process="2" data-open>12 次工具调用</button>',
+      )
+      tp2.id = 'tp2'
+
+      const members = []
+      for (let i = 1; i <= 4; i += 1) {
+        members.push(flowItem('tool', 2, '<div class="tool">工具行 ' + i + '（过程组成员）</div>', { 'data-turn-process-member': 'true' }))
+      }
+
+      const thinkItem = flowItem(
+        'tool',
+        2,
+        [
+          '<div data-disclosure-root data-open id="thinkroot">',
+          '  <div data-disclosure-row data-expandable id="thinkrow"><span>Think</span></div>',
+          '  <div class="rowbody" id="thinkbody">' +
+            Array.from({ length: 26 }, (_, i) => '思维链第 ' + (i + 1) + ' 段：先核对宿主的 DOM 契约，再决定吸顶边界。').join('\n') +
+            '</div>',
+          '</div>',
+        ].join(''),
+        { 'data-turn-process-member': 'true' },
+      )
+      thinkItem.id = 'thinkitem'
+      members.push(thinkItem)
+
+      for (let i = 5; i <= 8; i += 1) {
+        members.push(flowItem('tool', 2, '<div class="tool">工具行 ' + i + '（过程组成员）</div>', { 'data-turn-process-member': 'true' }))
+      }
+
+      const ans2 = flowItem('assistant-step', 2, filler('第 2 轮正文（最终答案）。', 420))
+      ans2.id = 'ans2'
+
+      // 第 3 轮
+      flowItem('user', 3, '<div class="prose">第 3 轮：用户消息</div>')
+      const turn3 = flowItem('assistant-step', 3, filler('第 3 轮正文。', 700))
+      turn3.id = 'turn3'
+
+      // 第 4 轮：纯思维（没有工具调用）——过程控件在，但没有"过程组成员"，
+      // 思维链长在回答节点内部（复刻宿主：AssistantMarkdown 把 reasoning 渲染成 ReasoningRow）
+      flowItem('user', 4, '<div class="prose">第 4 轮：用户消息</div>')
+      const tp4 = flowItem('turn-process', 4, '<button type="button" data-turn-process="4" data-open>已思考</button>')
+      tp4.id = 'tp4'
+      const ans4 = flowItem(
+        'assistant-step',
+        4,
+        [
+          '<div data-disclosure-root data-open id="r4root">',
+          '  <div data-disclosure-row data-expandable id="r4row"><span>Think</span></div>',
+          '  <div class="rowbody" id="r4body">' +
+            Array.from({ length: 26 }, (_, i) => '思维链第 ' + (i + 1) + ' 段：纯思维轮次，没有工具行。').join('\n') +
+            '</div>',
+          '</div>',
+          '<div class="prose" id="r4text" style="height:420px">第 4 轮正文（最终答案）。</div>',
+        ].join(''),
+      )
+      ans4.id = 'ans4'
+
+      // 第 5 轮：给末尾留出滚动余量（否则第 4 轮贴着文档底部，滚不过思维链块）
+      flowItem('assistant-step', 5, filler('第 5 轮正文（末尾余量）。', 700))
+
+      // ══════════════ 2. 模拟宿主自己的收起行为 ══════════════
+      const panelButton = tp2.querySelector('button[data-turn-process]')
+      const thinkRoot = document.getElementById('thinkroot')
+      const thinkRow = document.getElementById('thinkrow')
+      const thinkBody = document.getElementById('thinkbody')
+
+      let focusPatchedAtClick = null
+      panelButton.addEventListener('click', () => {
+        // 宿主：先把焦点移到控件，再隐藏成员（hidden="until-found"）
+        focusPatchedAtClick = panelButton.__dshPpFocusPatched === true
+        panelButton.focus()
+        panelButton.removeAttribute('data-open')
+        for (const member of members) member.setAttribute('hidden', 'until-found')
+      })
+
+      thinkRow.addEventListener('click', () => {
+        if (thinkRoot.hasAttribute('data-open')) {
+          thinkRoot.removeAttribute('data-open')
+          thinkBody.setAttribute('hidden', 'until-found')
+        } else {
+          thinkRoot.setAttribute('data-open', '')
+          thinkBody.removeAttribute('hidden')
+        }
+      })
+
+      // 第 4 轮：纯思维轮次。宿主收起过程时会关掉控件，并隐藏回答节点里的思维链块
+      const tp4Button = tp4.querySelector('button[data-turn-process]')
+      const r4root = document.getElementById('r4root')
+      const r4row = document.getElementById('r4row')
+      const r4body = document.getElementById('r4body')
+      tp4Button.addEventListener('click', () => {
+        tp4Button.removeAttribute('data-open')
+        r4root.removeAttribute('data-open')
+        r4body.setAttribute('hidden', 'until-found')
+      })
+      r4row.addEventListener('click', () => {
+        if (r4root.hasAttribute('data-open')) {
+          r4root.removeAttribute('data-open')
+          r4body.setAttribute('hidden', 'until-found')
+        } else {
+          r4root.setAttribute('data-open', '')
+          r4body.removeAttribute('hidden')
+        }
+      })
+
+      // ══════════════ 3. 复刻宿主客户端插件装载协议 ══════════════
+      document.getElementById('diag').textContent = 'stage: section-2'
+      // 测试台专用垫片：无头 Chrome 不产生合成帧，requestAnimationFrame 永不回调，
+      // 用定时器驱动它，让插件与断言都能按帧推进（语义仍是"下一帧之前"）。
+      window.requestAnimationFrame = (callback) => setTimeout(() => callback(Date.now()), 16)
+      window.cancelAnimationFrame = (handle) => clearTimeout(handle)
+
+      const registry = []
+      window.__ModuleLoader__ = { load: (entry) => registry.push(entry) }
+
+      const stubReact = {
+        createElement: (type, props, ...children) => ({ type, props, children }),
+        useState: (initial) => [initial, () => {}],
+        useEffect: () => {},
+        useRef: () => ({ current: null }),
+        useCallback: (fn) => fn,
+      }
+
+      const t = (key) => key
+      const components = []
+      const disposers = []
+      const settingsSnapshot = { status: 'ready', value: { pinned: true, rowPinned: true, keepAnchor: true, collapseAllHotkey: 'Ctrl+Alt+KeyC' } }
+      const ctx = {
+        effect: (fn) => {
+          disposers.push(fn())
+        },
+        locale: { register: () => {}, bind: () => t },
+        settingsScope: {
+          bind: () => ({
+            getSnapshot: () => settingsSnapshot,
+            subscribe: () => () => {},
+            set: () => undefined,
+          }),
+        },
+        slots: {
+          inject: (_name, fn) => fn(),
+          register: (spec, component) => {
+            components.push({ spec, component })
+            return () => {}
+          },
+        },
+      }
+    </script>
+
+    <!-- 被测对象：真实插件 bundle -->
+    <script src="../lib/client.js"></script>
+
+    <script>
+      // ══════════════ 4. 断言 ══════════════
+      const diagEl = document.getElementById('diag')
+      const runtimeErrors = []
+      window.addEventListener('error', (event) => runtimeErrors.push('ERROR ' + event.message))
+      window.addEventListener('unhandledrejection', (event) =>
+        runtimeErrors.push('REJECT ' + (event.reason && event.reason.message)),
+      )
+
+      const results = []
+      const check = (name, ok) => results.push([name, ok === true])
+      const frames = (n) => new Promise((resolve) => {
+        let left = n
+        const step = () => (left <= 0 ? resolve() : ((left -= 1), requestAnimationFrame(step)))
+        requestAnimationFrame(step)
+      })
+      const rectTop = (node) => Math.round(node.getBoundingClientRect().top)
+      const portTop = () => Math.round(scrollport.getBoundingClientRect().top)
+      const pinnedPanels = () => [...document.querySelectorAll('[data-dsh-pp-pinned]')]
+      const pinnedRows = () => [...document.querySelectorAll('[data-dsh-pp-row]')]
+      /** 真正"卡在顶部"的冻结条（标注了但自然位置就在视口里的不算）。 */
+      const stuckBars = () => {
+        const lines = []
+        for (const node of pinnedPanels()) if (Math.abs(rectTop(node) - portTop()) <= 1) lines.push(node)
+        for (const node of pinnedRows()) {
+          const offset = Math.round(node.getBoundingClientRect().top) - portTop()
+          if (offset === 0 || Math.abs(offset - 33) <= 1) lines.push(node)
+        }
+        return lines
+      }
+      let scrollEvents = 0
+      scrollport.addEventListener('scroll', () => { scrollEvents += 1 })
+      const scrollToOffset = async (target, offset) => {
+        scrollport.scrollTop = target.offsetTop + offset
+        // 测试台补偿：无头 Chrome 不产生合成帧，浏览器因此不派发 scroll 事件；
+        // 真实浏览器一定会派发，这里手动补一发。
+        scrollport.dispatchEvent(new Event('scroll'))
+        await frames(3)
+      }
+      const lastMember = members[members.length - 1]
+
+      function render() {
+        const failed = results.filter((entry) => !entry[1]).length
+        const errorLines = runtimeErrors.length === 0
+          ? ''
+          : '\n' + runtimeErrors.map((line) => '<span class="bad">' + line + '</span>').join('\n')
+        document.getElementById('diag').innerHTML =
+          '<b>case=' + caseName + ' · scrollTop=' + Math.round(scrollport.scrollTop) +
+          ' · panels=' + pinnedPanels().length + ' · rows=' + pinnedRows().length +
+          ' · stuck=' + stuckBars().length + ' · scrolls=' + scrollEvents + '</b>\n' +
+          results
+            .map(([name, ok]) => (ok ? '<span class="ok">ok   ' + name + '</span>' : '<span class="bad">BAD  ' + name + '</span>'))
+            .join('\n') +
+          errorLines +
+          '\n' +
+          (failed === 0 && runtimeErrors.length === 0 ? '<span class="ok">ALL PASS</span>' : '<span class="bad">FAILURES: ' + (failed + runtimeErrors.length) + '</span>')
+        document.title = failed === 0 && runtimeErrors.length === 0 ? 'PASS' : 'FAIL(' + (failed + runtimeErrors.length) + ')'
+      }
+
+      const params = new URLSearchParams(location.search)
+      const caseName = params.get('case') || 'ctl'
+
+      async function run() {
+        // 0) 模块协议与副作用登记
+        check('bundle 通过 __ModuleLoader__.load 注册', registry.length === 1)
+        const entry = registry[0]
+        check('module id = dsh-process-pin', entry.id === 'dsh-process-pin')
+        const exports = entry.factory((id) => {
+          if (id === 'react') return stubReact
+          throw new Error('unexpected require: ' + id)
+        })
+        check('导出 apply/inject', typeof exports.apply === 'function' && Array.isArray(exports.inject))
+        exports.apply(ctx)
+        check('样式标签已注入', document.querySelector('style[data-plugin-css="dsh-process-pin/styles.css"]') !== null)
+        check('配置卡片已注册（settings.plugin.item）', components.some((c) => c.spec.name === 'settings.plugin.item' && c.spec.key === 'process-pin'))
+        check('头部按钮已注册（header.utilities）', components.some((c) => c.spec.name === 'conversation.session.header.utilities'))
+        check('根类 .dsh-pp-on 已挂上', document.documentElement.classList.contains('dsh-pp-on'))
+        try {
+          for (const { component } of components) {
+            component({ t, useSettings: (sel) => sel(settingsSnapshot.value), setField: () => {}, useCount: (sel) => sel(0), collapseAll: () => {} })
+          }
+          check('配置卡片 / 头部按钮渲染无异常', true)
+        } catch (error) {
+          check('配置卡片 / 头部按钮渲染无异常（' + error.message + '）', false)
+        }
+
+        if (caseName === 'ctl') {
+          await scrollToOffset(tp2, 40)
+          const panels = pinnedPanels()
+          check('过程已滑出顶边 → 总控件吸顶', panels.length === 1 && panels[0] === tp2)
+          check('总控件贴在 0px（实测 ' + (panels[0] ? rectTop(panels[0]) : 'n/a') + '）', panels.length === 1 && rectTop(panels[0]) === portTop())
+          check('总控件 position=sticky', panels.length === 1 && getComputedStyle(panels[0]).position === 'sticky')
+          check('总控件底色不透明', panels.length === 1 && !/rgba\(0, 0, 0, 0\)|transparent/.test(getComputedStyle(panels[0]).backgroundColor))
+          check('未展开的上一轮控件不吸顶', panels.every((node) => node === tp2))
+          check('子层此刻还在自然位置（未被拉起）', pinnedRows().every((node) => rectTop(node) > portTop() + 40))
+          check('滚动监听已接通（收到 scroll 事件）', scrollEvents > 0)
+        }
+
+        if (caseName === 'think') {
+          await scrollToOffset(thinkBody, 120)
+          const panels = pinnedPanels()
+          const rows = pinnedRows()
+          const panelHeight = panels.length === 1 ? Math.round(panels[0].getBoundingClientRect().height) : 0
+          check('总控件仍在吸顶（' + panelHeight + 'px）', panels.length === 1 && panelHeight > 20)
+          check('Think 行已吸顶（top=' + rectTop(thinkRow) + '，期望 ' + (portTop() + panelHeight) + '）',
+            Math.abs(rectTop(thinkRow) - portTop() - panelHeight) <= 1)
+          check('两级叠放：子层顶边 = 父层高度（' + rectTop(thinkRow) + ' ≈ ' + (portTop() + panelHeight) + '）',
+            Math.abs(rectTop(thinkRow) - portTop() - panelHeight) <= 1)
+          check('子层让位偏移用实测高度', thinkRow.style.getPropertyValue('--dsh-pp-top') === panelHeight + 'px')
+        }
+
+        if (caseName === 'after') {
+          await scrollToOffset(thinkBody, 700)
+          const panels = pinnedPanels()
+          check('Think 正文读完后子层脱开（top=' + rectTop(thinkRow) + ' < 0）', rectTop(thinkRow) < portTop() - 1)
+          check('此时总控件仍吸顶', panels.length === 1 && rectTop(panels[0]) === portTop())
+        }
+
+        if (caseName === 'answer') {
+          await scrollToOffset(ans2, 60)
+          check('进入最终答案后总控件收起（不再吸顶）', pinnedPanels().length === 0)
+        }
+
+        if (caseName === 'reup') {
+          await scrollToOffset(ans2, 60)
+          check('先确认已进入答案（无吸顶）', pinnedPanels().length === 0)
+          await scrollToOffset(lastMember, -600)
+          const panels = pinnedPanels()
+          check('几何：控件 top=' + rectTop(panelButton) + ' 末成员 bottom=' +
+            Math.round(lastMember.getBoundingClientRect().bottom) + ' open=' + panelButton.hasAttribute('data-open') +
+            ' scrolls=' + scrollEvents, panels.length === 1)
+          check('上滑到过程行重新露头 → 总控件自动回来', panels.length === 1 && rectTop(panels[0]) === portTop())
+        }
+
+        if (caseName === 'deep') {
+          await scrollToOffset(thinkBody, 300)
+          const panels = pinnedPanels()
+          const rows = pinnedRows()
+          check('阅读线被收进折叠区之前：两层都在（父层 ' + panels.length + '，子层含本行 ' + rows.indexOf(thinkRow) + '）',
+            panels.length === 1 && rows.indexOf(thinkRow) >= 0)
+          // 点吸顶的总控件 → 模拟宿主收起，并检查 C（阅读位置锚定）
+          const beforeAnsTop = rectTop(ans2)
+          const beforeScroll = Math.round(scrollport.scrollTop)
+          panels[0].querySelector('button[data-turn-process]').click()
+          await frames(26)
+          check('收起时抑制了 focus 引发的滚动（保留焦点语义）', focusPatchedAtClick === true)
+          check('收起后过程成员已隐藏', members.slice(0, 5).every((member) => member.hasAttribute('hidden')))
+          check('收起后总控件不再吸顶', pinnedPanels().length === 0)
+          check('收起后本行不再标注吸顶', pinnedRows().indexOf(thinkRow) < 0)
+          check('收起后答案被顶到视口顶边（答案 top ' + beforeAnsTop + '→' + rectTop(ans2) +
+            '，scroll ' + beforeScroll + '→' + Math.round(scrollport.scrollTop) +
+            '，anchor=' + JSON.stringify(window.dshProcessPin.anchorStats()) + '）',
+            Math.abs(rectTop(ans2) - portTop()) <= 2)
+        }
+
+        if (caseName === 'row') {
+          await scrollToOffset(thinkBody, 300)
+          const panels = pinnedPanels()
+          const rows = pinnedRows()
+          check('收起前：父层 + 子层都在', panels.length === 1 && rows.indexOf(thinkRow) >= 0)
+          const panelHeight = panels.length === 1 ? Math.round(panels[0].getBoundingClientRect().height) : 0
+          const nextItem = members[5]
+          const beforeNextTop = rectTop(nextItem)
+          const panelsBefore = pinnedPanels().length
+          thinkRow.click()
+          await frames(26)
+          check('click 前父层已吸顶', panelsBefore === 1)
+          check('收起后：Think 正文已隐藏', thinkBody.hasAttribute('hidden'))
+          check('收起后：子层标题不再吸顶', pinnedRows().indexOf(thinkRow) < 0)
+          check('收起后：父层仍然吸顶（控件 top=' + rectTop(panelButton) + ' 末成员 bottom=' +
+            Math.round(lastMember.getBoundingClientRect().bottom) + ' open=' + panelButton.hasAttribute('data-open') +
+            ' scrolls=' + scrollEvents + '）', pinnedPanels().length === 1)
+          check('收起后：折叠区之后的内容顶到父层下方（' + beforeNextTop + '→' + rectTop(nextItem) +
+            '，期望 ' + (portTop() + panelHeight) + '，anchor=' + JSON.stringify(window.dshProcessPin.anchorStats()) + '）',
+            Math.abs(rectTop(nextItem) - portTop() - panelHeight) <= 2)
+        }
+
+        if (caseName === 'thinkonly') {
+          // 纯思维轮次：过程控件滑出顶边、思维链（在回答节点内部）留在视口里
+          await scrollToOffset(r4body, 120)
+          const panels = pinnedPanels()
+          const panelHeight = panels.length === 1 ? Math.round(panels[0].getBoundingClientRect().height) : 0
+          check('纯思维轮次（无过程组成员）：总控件仍然吸顶（top=' + (panels[0] ? rectTop(panels[0]) : 'n/a') + '）',
+            panels.length === 1 && panels[0] === tp4 && rectTop(panels[0]) === portTop())
+          check('纯思维轮次：思维链行也吸顶（top=' + rectTop(r4row) + '，期望 ' + (portTop() + panelHeight) + '）',
+            Math.abs(rectTop(r4row) - portTop() - panelHeight) <= 1)
+          // 继续读到思维链之后的最终答案 → 总控件按约定释放
+          await scrollToOffset(r4text, 40)
+          const root = document.getElementById('r4root')
+          check('读到思维链之后的正文 → 总控件释放（scroll=' + Math.round(scrollport.scrollTop) +
+            ' 思维链块 bottom=' + Math.round(root.getBoundingClientRect().bottom) + '）',
+            pinnedPanels().length === 0)
+        }
+
+        if (caseName === 'count') {
+          await scrollToOffset(thinkBody, 120)
+          const badge = window.dshProcessPin
+          check('调试句柄已暴露', badge !== undefined && typeof badge.count === 'function')
+          // 展开中的区块：第 2 轮过程控件 + 第 2 轮 Think 行 + 第 4 轮过程控件 + 第 4 轮 Think 行
+          check('展开计数 = 4（两轮过程控件 + 两条 Think 行，实测 ' + badge.count() + '）', badge.count() === 4)
+          check('快捷键文案 = Ctrl+Alt+C', badge.hotkey() === 'Ctrl+Alt+C')
+          badge.collapseAll()
+          await frames(6)
+          check('全部收起后计数归零', badge.count() === 0)
+          check('全部收起后过程成员隐藏', members.slice(0, 5).every((member) => member.hasAttribute('hidden')))
+        }
+
+        if (caseName === 'turn3') {
+          await scrollToOffset(turn3, 200)
+          check('走到下一轮后没有任何吸顶条卡在顶部', stuckBars().length === 0)
+        }
+
+        render()
+      }
+
+      window.addEventListener('load', () => {
+        run().catch((error) => {
+          results.push(['测试运行异常：' + error.message, false])
+          render()
+        })
+      })
+    </script>
+  </body>
+</html>
